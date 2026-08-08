@@ -59,11 +59,52 @@ describe('SearchEngine', () => {
     expect(results[0].document.id).toBe('github-k8s-repo')
   })
 
-  it('tolerates a typo in "grafna" and still surfaces Grafana Production Dashboard', () => {
+  it('does NOT tolerate typos — "grafna" (no such substring) yields no results', () => {
     const engine = buildEngine()
-    const results = engine.search('grafna')
-    expect(results.length).toBeGreaterThan(0)
-    expect(results[0].document.id).toBe('grafana-prod')
+    expect(engine.search('grafna')).toHaveLength(0)
+  })
+
+  it('is case-insensitive for both query and document text', () => {
+    const engine = buildEngine()
+    const ids = engine.search('GRAFANA').map((r) => r.document.id)
+    expect(ids).toContain('grafana-prod')
+  })
+
+  it('is order-independent across query tokens', () => {
+    const engine = buildEngine()
+    const a = engine.search('kub graf').map((r) => r.document.id)
+    const b = engine.search('graf kub').map((r) => r.document.id)
+    expect(a).toEqual(b)
+    expect(a[0]).toBe('grafana-prod')
+  })
+
+  it('requires every token to be present (AND), excluding partial matches', () => {
+    const engine = buildEngine()
+    // "grafana" matches grafana-prod, but "handler" appears nowhere -> excluded.
+    expect(engine.search('grafana handler')).toHaveLength(0)
+  })
+
+  it('collapses runs of whitespace into token separators without empty tokens', () => {
+    const engine = buildEngine()
+    const tight = engine.search('kub graf').map((r) => r.document.id)
+    const loose = engine.search('  kub    graf  ').map((r) => r.document.id)
+    expect(loose).toEqual(tight)
+  })
+
+  it('matches tokens as substrings anywhere in the combined text ("l ser ov")', () => {
+    const engine = new SearchEngine([
+      {
+        id: 'prod-manager',
+        name: '[prod] manager service overview',
+        url: 'https://example.com/prod',
+        path: 'Ops',
+        keywords: [],
+      },
+    ])
+    // Every short token is a substring of the combined text; order irrelevant.
+    expect(engine.search('l ser ov').map((r) => r.document.id)).toEqual(['prod-manager'])
+    // "lu" is absent -> the whole row is dropped even though "s"/"ov" match.
+    expect(engine.search('lu s ov')).toHaveLength(0)
   })
 
   it('returns all documents ordered by usage (desc) then name when the query is empty', () => {
